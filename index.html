@@ -91,6 +91,19 @@
       instCodeInput.value = '';
       hospitalInput.value = '';
     }
+    function parseGS1(text) {
+      const cleaned = text.replace(/[()]/g, '').replace(/\u001d/g, '');
+      const m01 = cleaned.match(/01(\d{14})/);
+      const m17 = cleaned.match(/17(\d{6})/);
+      let lot = '';
+      const m10 = cleaned.match(/10([^\u001d]+)/);
+      if (m10) lot = m10[1];
+      return {
+        productCode: m01 ? m01[1] : '',
+        expiryDate: m17 ? m17[1] : '',
+        lotNumber: lot
+      };
+    }
     startBtn.addEventListener('click', () => {
       startBtn.style.display = 'none';
       statusDiv.textContent = 'カメラ起動中…';
@@ -112,12 +125,10 @@
             codeReader.reset();
             videoPreview.style.display = 'none';
             const text = result.getText();
-            const m01 = text.match(/\(01\)(\d{14})/);
-            const m17 = text.match(/\(17\)(\d{6})/);
-            const m10 = text.match(/\(10\)([^\(]+)/);
-            productCodeInput.value = m01 ? m01[1] : '';
-            expiryDateInput.value = m17 ? m17[1] : '';
-            lotNumberInput.value = m10 ? m10[1] : '';
+            const fields = parseGS1(text);
+            productCodeInput.value = fields.productCode;
+            expiryDateInput.value = fields.expiryDate;
+            lotNumberInput.value = fields.lotNumber;
             form.style.display = 'block';
             statusDiv.textContent = 'コードを取得しました。必要事項を入力してください。';
             instCodeInput.focus();
