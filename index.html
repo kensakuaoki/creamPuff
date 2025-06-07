@@ -1,15 +1,171 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="robots" content="noindex, nofollow">
-    <title>Cream Puff</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GS1 DataBar Scanner</title>
+  <!-- ZXing library -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif;
+      text-align: center;
+      padding: 1em 0.5em;
+    }
+    #video-preview {
+      width: 100%;
+      max-width: none;
+      height: auto;
+      background: black;
+      display: none;
+    }
+    form {
+      margin: 1.5em auto;
+      max-width: 380px;
+      display: none;
+    }
+    .form-row {
+      margin-bottom: 1em;
+      display: flex;
+      flex-direction: column;
+    }
+    input[type="text"] {
+      font-size: 1em;
+    }
+    .btn {
+      padding: 0.6em 1.6em;
+      margin-top: 0.5em;
+    }
+  </style>
 </head>
 <body>
-    <p id="address"></p>
-    <script>
-        const encodedAddress = "c2FtcGxlQGV4YW1wbGUuY29t"; // sample@example.com in Base64
-        document.getElementById('address').textContent = atob(encodedAddress);
-    </script>
+  <h1>GS1 DataBar Scanner</h1>
+  <video id="video-preview"></video>
+  <div id="status"></div>
+  <form id="info-form">
+    <div class="form-row">
+      <label for="product-code">商品コード(AI=01)</label>
+      <input type="text" id="product-code" readonly />
+    </div>
+    <div class="form-row">
+      <label for="expiry-date">有効期限(YYMMDD, AI=17)</label>
+      <input type="text" id="expiry-date" readonly />
+    </div>
+    <div class="form-row">
+      <label for="lot-number">ロット番号(AI=10)</label>
+      <input type="text" id="lot-number" readonly />
+    </div>
+    <div class="form-row">
+      <label for="institution-code">医療機関コード</label>
+      <input type="text" id="institution-code" required />
+    </div>
+    <div class="form-row">
+      <label for="hospital">医療機関名</label>
+      <input type="text" id="hospital" required />
+    </div>
+    <button type="submit" class="btn" id="send-mail">この内容でメール作成</button>
+    <button type="button" class="btn" id="rescan">再スキャン</button>
+  </form>
+  <button id="start-scan" class="btn">スキャン開始</button>
+  <script>
+    const videoPreview = document.getElementById('video-preview');
+    const statusDiv = document.getElementById('status');
+    const startBtn = document.getElementById('start-scan');
+    const form = document.getElementById('info-form');
+    const productCodeInput = document.getElementById('product-code');
+    const expiryDateInput = document.getElementById('expiry-date');
+    const lotNumberInput = document.getElementById('lot-number');
+    const instCodeInput = document.getElementById('institution-code');
+    const hospitalInput = document.getElementById('hospital');
+    const rescanBtn = document.getElementById('rescan');
+    let codeReader;
+    function resetUI() {
+      form.style.display = 'none';
+      startBtn.style.display = 'block';
+      videoPreview.style.display = 'none';
+      statusDiv.textContent = '';
+      productCodeInput.value = '';
+      expiryDateInput.value = '';
+      lotNumberInput.value = '';
+      instCodeInput.value = '';
+      hospitalInput.value = '';
+    }
+    startBtn.addEventListener('click', () => {
+      startBtn.style.display = 'none';
+      statusDiv.textContent = 'カメラ起動中…';
+      videoPreview.style.display = 'block';
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.RSS_EXPANDED,
+        ZXing.BarcodeFormat.RSS_14,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.UPC_A
+      ]);
+      codeReader = new ZXing.BrowserMultiFormatReader(hints);
+      codeReader.listVideoInputDevices().then(devices => {
+        if (!devices.length) throw new Error('カメラデバイスが見つかりません');
+        const deviceId = devices[devices.length - 1].deviceId;
+        codeReader.decodeFromVideoDevice(deviceId, videoPreview, (result, err) => {
+          if (result) {
+            codeReader.reset();
+            videoPreview.style.display = 'none';
+            const text = result.getText();
+            const m01 = text.match(/\(01\)(\d{14})/);
+            const m17 = text.match(/\(17\)(\d{6})/);
+            const m10 = text.match(/\(10\)([^\(]+)/);
+            productCodeInput.value = m01 ? m01[1] : '';
+            expiryDateInput.value = m17 ? m17[1] : '';
+            lotNumberInput.value = m10 ? m10[1] : '';
+            form.style.display = 'block';
+            statusDiv.textContent = 'コードを取得しました。必要事項を入力してください。';
+            instCodeInput.focus();
+          }
+          if (err && !(err instanceof ZXing.NotFoundException)) {
+            console.warn(err);
+          }
+        });
+      }).catch(err => {
+        statusDiv.textContent = 'カメラ起動に失敗しました: ' + err;
+        startBtn.style.display = 'block';
+        videoPreview.style.display = 'none';
+      });
+    });
+    rescanBtn.addEventListener('click', () => {
+      if (codeReader) codeReader.reset();
+      resetUI();
+    });
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const mailto = generateMailto({
+        productCode: productCodeInput.value,
+        expiryDate: expiryDateInput.value,
+        lotNumber: lotNumberInput.value,
+        institutionCode: instCodeInput.value,
+        hospital: hospitalInput.value
+      });
+      window.location.href = mailto;
+      resetUI();
+    });
+    function generateMailto(fields) {
+      const address = 'splatoon@orutanahasha.com';
+      const subject = encodeURIComponent('新マス：商品コード ' + fields.productCode);
+      const bodyLines = [
+        '以下の内容でご連絡いたします。',
+        '',
+        '-------------------------------------------------',
+        `┃ 商品コード         ┃ ${fields.productCode}`,
+        `┃ 有効期限（YYMMDD） ┃ ${fields.expiryDate}`,
+        `┃ ロット番号         ┃ ${fields.lotNumber}`,
+        `┃ 医療機関コード     ┃ ${fields.institutionCode}`,
+        `┃ 医療機関名         ┃ ${fields.hospital}`,
+        '-------------------------------------------------'
+      ];
+      const body = bodyLines.join('\n');
+      return `mailto:${address}?subject=${subject}&body=${encodeURIComponent(body)}`;
+    }
+    resetUI();
+  </script>
 </body>
 </html>
